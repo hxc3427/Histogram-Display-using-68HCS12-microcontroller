@@ -1,0 +1,288 @@
+// Project 1: This project displays 
+// Authors: Harshdeep Singh Chawla, Deekshith Shenoy Manur.
+// 
+//
+
+
+
+// Include files:
+#include <hidef.h>      /* common defines and macros */
+#include <stdio.h>      /* Standard I/O Library */
+
+// Other files used for this project:
+#include "types.h"
+#include "derivative.h" 
+// Definitions
+
+// Change this value to change the frequency of the output compare signal.
+// The value is in Hz.
+#define OC_FREQ_HZ    ((UINT16)10)
+
+// Macro definitions for determining the TC1 value for the desired frequency
+// in Hz (OC_FREQ_HZ). The formula is:
+//
+// TC1_VAL = ((Bus Clock Frequency / Prescaler value) / 2) / Desired Freq in Hz
+//
+// Where:
+//        Bus Clock Frequency     = 2 MHz
+//        Prescaler Value         = 2 (Effectively giving us a 1 MHz timer)
+//        2 --> Since we want to toggle the output at half of the period
+//        Desired Frequency in Hz = The value you put in OC_FREQ_HZ
+//
+#define BUS_CLK_FREQ  ((UINT32) 2)   
+#define PRESCALE      ((UINT16)  2)         
+#define TC1_VAL       ((UINT16)  (((BUS_CLK_FREQ / PRESCALE) / 2) / OC_FREQ_HZ))
+
+#define No_of_Readings (1000)
+#define Upper_Bucket_Lim (1050)
+#define Lower_Bucket_Lim (950)
+#define Bucket_Counts (100)
+
+UINT16 No_of_Val_Recorded;
+UINT16 Timer_Readings[ No_of_Readings] ={0};
+UINT16 Buckets[Bucket_Counts] = {0};
+UINT16 timeval1=0;
+UINT16 timeval2=0;
+
+
+
+// Initializes SCI0 for 8N1, 9600 baud, polled I/O
+// The value for the baud selection registers is determined
+// using the formula:
+//
+// SCI0 Baud Rate = ( 2 MHz Bus Clock ) / ( 16 * SCI0BD[12:0] )
+//--------------------------------------------------------------
+void InitializeSerialPort(void)
+{
+    // Set baud rate to ~9600 (See above formula)
+    SCI0BD = 13;          
+    
+    // 8N1 is default, so we don't have to touch SCI0CR1.
+    // Enable the transmitter and receiver.
+    SCI0CR2_TE = 1;
+    SCI0CR2_RE = 1;
+}
+
+
+
+//--------------------------------------------------------------       
+// Initializes I/O and timer settings for the demo.
+//--------------------------------------------------------------       
+void InitializeTimer(void)
+{
+  // Set the timer prescaler to %2, since the bus clock is at 2 MHz,
+  // and we want the timer running at 1 MHz
+  TSCR2_PR0 = 1;
+  TSCR2_PR1 = 0;
+  TSCR2_PR2 = 0;
+    
+  // Enable input mode on Channel 1
+  TIOS_IOS1 = 0;
+  TCTL4_EDG1A = 1;
+  TCTL4_EDG1B = 0;
+  
+  // Set up output compare action to toggle Port T, bit 1
+  //TCTL2_OM1 = 0;
+  //TCTL2_OL1 = 1;
+  
+  // Set up timer compare value
+  TC1 = TC1_VAL;
+  
+  // Clear the Output Compare Interrupt Flag (Channel 1) 
+  TFLG1 = TFLG1_C1F_MASK;
+  
+  // Enable the output compare interrupt on Channel 1;
+  //TIE_C1I = 1;  
+  
+  //
+  // Enable the timer
+  // 
+  TSCR1_TEN = 1;
+   
+  //
+  // Enable interrupts via macro provided by hidef.h
+  //
+  EnableInterrupts;
+}
+
+
+//--------------------------------------------------------------       
+// Output Compare Channel 1 Interrupt Service Routine
+// Refreshes TC1 and clears the interrupt flag.
+//          
+// The first CODE_SEG pragma is needed to ensure that the ISR
+// is placed in non-banked memory. The following CODE_SEG
+// pragma returns to the default scheme. This is neccessary
+// when non-ISR code follows. 
+//
+// The TRAP_PROC tells the compiler to implement an
+// interrupt funcion. Alternitively, one could use
+// the __interrupt keyword instead.
+// 
+// The following line must be added to the Project.prm
+// file in order for this ISR to be placed in the correct
+// location:
+//		VECTOR ADDRESS 0xFFEC OC1_isr 
+#pragma push
+#pragma CODE_SEG __SHORT_SEG NON_BANKED
+//-------------------------------------------------------------- 
+
+
+void interrupt 9 OC1_isr( void )
+{
+  
+  Timer_Readings[No_of_Val_Recorded++] = (UINT16)TC1;   // Capture the Timer values:
+  
+  
+  //TC1     +=  TC1_VAL;      
+  TFLG1   =   TFLG1_C1F_MASK;
+  
+  if(No_of_Val_Recorded > No_of_Readings )
+  {
+    TIE_C1I = 0;
+  }
+  TCNT=0;
+}
+#pragma pop
+
+
+
+
+void TERMIO_PutChar(INT8 ch)
+{
+    // Poll for the last transmit to be complete
+    do
+    {
+      
+    } while (SCI0SR1_TC == 0);
+    
+    // write the data to the output shift register
+    SCI0DRL = ch;
+}
+
+
+//--------------------------------------------------------------       
+// Polls for a character on the serial port.
+//
+// Returns: Received character
+//--------------------------------------------------------------       
+UINT8 GetChar(void)
+{ 
+  // Poll for data
+  do
+  {
+    // Nothing
+  } while(SCI0SR1_RDRF == 0);
+   
+  // Fetch and return data from SCI0
+  return SCI0DRL;
+}
+
+
+
+
+
+UINT8 PostRoutine() {
+int i=0;
+timeval1 = TCNT;
+
+
+for(i=0; i<500;i++) {
+}
+timeval2 = TCNT;
+if(timeval1 !=  timeval2){
+return 1;} else
+return 0;
+}
+
+
+
+void main(void)
+{
+  
+  UINT8 Input_KeyPress;
+ 
+  
+
+  
+  
+  InitializeSerialPort();
+  InitializeTimer();
+  
+  // 
+  if( PostRoutine() ){
+  
+  printf( "..... " );
+  printf( "\n\r" );
+  
+} else {
+exit();}
+    
+    while(1){
+      
+      printf( "Press any key to start measuring pulse values " );  // waiting for user measurement.
+      Input_KeyPress = GetChar();        
+     
+      TIE_C1I = 1;          // Enable the interrupt
+      No_of_Val_Recorded = 0;
+      printf(" Measuring the Timer Values of each pulse");
+      
+      
+      while( No_of_Val_Recorded < No_of_Readings )
+      {
+        
+      }
+
+      printf( "Press a key to start the measurements> " );
+      Input_KeyPress = GetChar();
+      printf( "\n\n\n" );
+      
+     
+      printf(" No of Values Recorded is %d\n\r ", No_of_Val_Recorded);
+      
+      for( No_of_Val_Recorded = 0; No_of_Val_Recorded < No_of_Readings; No_of_Val_Recorded++ )
+      
+      {
+        Timer_Readings[ No_of_Readings] = Timer_Readings[ No_of_Readings+1] - Timer_Readings[ No_of_Readings];
+      }   // Do Time Difference Calculations
+      
+      for( No_of_Val_Recorded = 0; No_of_Val_Recorded < No_of_Readings; No_of_Val_Recorded++ )
+      {
+        Buckets[ Timer_Readings[No_of_Val_Recorded] - Lower_Bucket_Lim] += 1; 
+        
+      }  // Do the bucket counts calculations,
+      
+      
+      
+      
+       for( No_of_Val_Recorded = 0; No_of_Val_Recorded < Bucket_Counts ; No_of_Val_Recorded++ )
+      {
+        if( Buckets[No_of_Val_Recorded] != 0 ){
+        if(GetChar()){
+          
+          printf("\t%u microsecs: %u\n\r", No_of_Val_Recorded + Lower_Bucket_Lim, Buckets[No_of_Val_Recorded]);   // print bucket counts 
+        }
+          
+         
+        }
+      }
+          
+          
+          
+          
+          
+          
+          
+          
+          
+            
+
+          
+          
+        }
+      }
+      
+     
+
+
+   
